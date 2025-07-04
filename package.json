@@ -1,0 +1,29 @@
+{
+  "name": "task-pool-coordinator",
+  "version": "1.0.0",
+  "description": "task pool coordinator",
+  "author": "adoin<adoin@qq.com>",
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "typescript": "^5.0.0"
+  },
+  "module": "dist/index.mjs",
+  "main": "dist/index.cjs",
+  "types": "dist/type.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "index.ts",
+    "type.ts"
+  ],
+  "scripts": {
+    "build": "vite build && tsc --emitDeclarationOnly --declaration --declarationDir dist --outDir dist"
+  },
+  "keywords": [],
+  "license": "ISC"
+}
