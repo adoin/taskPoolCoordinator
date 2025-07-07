@@ -39,6 +39,8 @@ export class TaskPool {
   public readonly setConcurrency: (newConcurrency: number) => void
   // 重置任务池（彻底清空所有状态）
   public readonly reset: () => void
+  // 获取所有任务
+  public readonly getAllTasks: () => Array<Task & { seq: number }>
   // 获取任务池当前状态
   public readonly getStatus: () => {
     total: number
@@ -259,6 +261,10 @@ export class TaskPool {
     // 判断任务池是否处于暂停状态
     this.isPaused = () => {
       return this.paused
+    }
+    // 获取所有任务
+    this.getAllTasks = () => {
+      return this.allTasks
     }
   }
 }
