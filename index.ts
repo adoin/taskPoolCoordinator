@@ -88,7 +88,7 @@ export class TaskPool {
     submit,
   }: {
     taskPool: Task[]
-    executor: (totalResult: { seq: number, result: any, status: 'success' | 'error' }[], crtResult?: any, crtIndex?: number, error?: any) => any
+    executor?: (totalResult: { seq: number, result: any, status: 'success' | 'error' }[], crtResult?: any, crtIndex?: number, error?: any) => any
     concurrency: number
     maintainOrder?: boolean
     immediately?: boolean
@@ -120,7 +120,7 @@ export class TaskPool {
             .then((crtRes) => {
               if (!proxyTask.deleted) {
                 this.resultPool.push({ seq: proxyTask.seq, result: crtRes, status: 'success' })
-                if (immediately) {
+                if (immediately && executor) {
                   executor(this.resultPool, crtRes, proxyTask.seq)
                 }
                 // 移除已完成任务，递归补位
@@ -136,7 +136,7 @@ export class TaskPool {
                 this.runningPool = this.runningPool.filter(
                   f => f.seq !== proxyTask.seq,
                 )
-                if (immediately) {
+                if (immediately && executor) {
                   executor(this.resultPool, undefined, proxyTask.seq, err)
                 }
                 console.error(`🐛！taskPoolExecutor:任务${proxyTask.seq}执行出错`, err)
@@ -147,7 +147,7 @@ export class TaskPool {
       }
       // 全部任务完成后，统一回调executor
       if (this.restPool.length === 0 && this.runningPool.length === 0) {
-        if (!immediately) {
+        if (!immediately && executor) {
           executor(this.maintainOrder ? this.resultPool.sort((a, b) => a.seq - b.seq) : this.resultPool)
         }
         // autoSubmit逻辑
