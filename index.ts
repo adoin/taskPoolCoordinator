@@ -207,6 +207,13 @@ export class TaskPool {
         runningTask.handleDelete?.(...(runningTask.args??[]))
         this.runningPool = this.runningPool.filter(f => f.seq !== seq)
         this.allTasks = this.allTasks.filter(f => f.seq !== seq)
+        //如果是最后一个进行中任务，则可能触发submit
+        if (this.runningPool.length === 0) {
+          if (this.autoSubmit && this.submit && this.chunkResultPool.length > 0) {
+            this.submit(this.maintainOrder ? this.chunkResultPool.sort((a, b) => a.seq - b.seq) : this.chunkResultPool)
+            this.chunkResultPool = []
+          }
+        }
         this.executorFn()
       }
       else {
