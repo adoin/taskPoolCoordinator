@@ -126,7 +126,7 @@ export class TaskPool {
       while (this.restPool.length && this.runningPool.length < this.concurrency) {
         const task = this.restPool.shift()
         if (task) {
-          const proxyTask = { body: task.body, args: task.args, seq: task.seq, deleted: false }
+          const proxyTask = { body: task.body, args: task.args, seq: task.seq, deleted: false, handleDelete: task.handleDelete }
           this.runningPool.push(proxyTask)
           // 执行任务体，异步处理结果
           proxyTask
