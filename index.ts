@@ -19,6 +19,8 @@ export class TaskPool {
   private maintainOrder = false
   // 已完成任务的结果池
   private resultPool: { seq: number, result: any, status: 'success' | 'error' }[] = []
+  // 自动提交的结果池子
+  private chunkResultPool: { seq: number, result: any, status: 'success' | 'error' }[] = []
   // 未开始任务池
   private restPool: Array<Task & { seq: number }> = []
   // 任务池是否正在运行（防止start重复调度）
@@ -61,12 +63,22 @@ export class TaskPool {
   public immediately: boolean
   private autoSubmit: boolean
   private submit?: (results: { seq: number, result: any, status: 'success' | 'error' }[]) => any | Promise<any>
+  // 是否自动调度（添加任务时自动触发调度），默认为true
+  private autoSchedule = true
   /**
    * 动态设置immediately属性
    * @param newVal 是否立即回调executor
    */
   public setImmediately(newVal: boolean) {
     this.immediately = newVal
+  }
+
+  /**
+   * 设置是否自动调度
+   * @param val 是否自动调度
+   */
+  public setAutoSchedule(val: boolean) {
+    this.autoSchedule = val
   }
 
   /***
@@ -122,6 +134,7 @@ export class TaskPool {
             .then((crtRes) => {
               if (!proxyTask.deleted) {
                 this.resultPool.push({ seq: proxyTask.seq, result: crtRes, status: 'success' })
+                this.chunkResultPool.push({ seq: proxyTask.seq, result: crtRes, status: 'success' })
                 if (immediately && executor) {
                   executor(this.resultPool, crtRes, proxyTask.seq)
                 }
@@ -135,6 +148,7 @@ export class TaskPool {
             .catch((err) => {
               if (!proxyTask.deleted) {
                 this.resultPool.push({ seq: proxyTask.seq, result: err, status: 'error' })
+                this.chunkResultPool.push({ seq: proxyTask.seq, result: err, status: 'error' })
                 this.runningPool = this.runningPool.filter(
                   f => f.seq !== proxyTask.seq,
                 )
@@ -144,22 +158,23 @@ export class TaskPool {
                 console.error(`🐛！taskPoolExecutor:任务${proxyTask.seq}执行出错`, err)
                 this.executorFn()
               }
+            }).finally(() => {
+               // 全部任务完成后，统一回调executor
+              if (this.restPool.length === 0 && this.runningPool.length === 0) {
+                if (!immediately && executor && this.resultPool.length > 0) {
+                  executor(this.maintainOrder ? this.resultPool.sort((a, b) => a.seq - b.seq) : this.resultPool)
+                }
+                // autoSubmit逻辑
+                if (this.autoSubmit && this.submit && this.chunkResultPool.length > 0) {
+                  this.submit(this.maintainOrder ? this.chunkResultPool.sort((a, b) => a.seq - b.seq) : this.chunkResultPool)
+                  this.chunkResultPool = []
+                }
+                this.isRunning = false // 任务全部完成后重置isRunning，允许再次start
+              }
             })
         }
       }
-      // 全部任务完成后，统一回调executor
-      if (this.restPool.length === 0 && this.runningPool.length === 0) {
-        if (!immediately && executor) {
-          executor(this.maintainOrder ? this.resultPool.sort((a, b) => a.seq - b.seq) : this.resultPool)
-        }
-        // autoSubmit逻辑
-        if (this.autoSubmit && this.submit) {
-          const results = this.maintainOrder ? this.resultPool.sort((a, b) => a.seq - b.seq) : this.resultPool
-          Promise.resolve(this.submit(results)).finally(() => {
-            this.reset()
-          })
-        }
-      }
+     
     }
     // 添加任务（支持单个/批量），自动分配唯一seq
     this.addTask = (task: Task | Task[]) => {
@@ -173,7 +188,14 @@ export class TaskPool {
         this.restPool.push(taskWithSeq)
         this.allTasks.push(taskWithSeq)
       }
-      this.executorFn()
+      // 运行中动态添加任务时自动调度（受autoSchedule控制）
+      if (this.autoSchedule) {
+        if (this.isRunning) {
+          this.executorFn()
+        } else {
+          this.start()
+        }
+      }
     }
     // 删除任务，支持未开始、进行中、已完成三种状态
     this.deleteTask = (seq: number) => {
@@ -182,26 +204,27 @@ export class TaskPool {
       const runningTask = this.runningPool.find(f => f.seq === seq)
       if (runningTask) {
         runningTask.deleted = true
+        runningTask.handleDelete?.(...(runningTask.args??[]))
         this.runningPool = this.runningPool.filter(f => f.seq !== seq)
         this.allTasks = this.allTasks.filter(f => f.seq !== seq)
-        runningTask.handleDelete?.()
         this.executorFn()
       }
       else {
         /* 删除未开始任务 */
         const restTask = this.restPool.find(f => f.seq === seq)
         if (restTask) {
+          restTask.handleDelete?.(...(restTask.args??[]))
           this.restPool = this.restPool.filter(f => f.seq !== seq)
           this.allTasks = this.allTasks.filter(f => f.seq !== seq)
-          restTask.handleDelete?.()
         }
         else {
           /* 删除已完成任务 */
           const doneTarget = this.allTasks.find(f => f.seq === seq)
           if (doneTarget) {
-            doneTarget.handleDelete?.()
+            doneTarget.handleDelete?.(...(doneTarget.args??[]))
             this.allTasks = this.allTasks.filter(f => f.seq !== seq)
             this.resultPool = this.resultPool.filter(f => f.seq !== seq)
+            this.chunkResultPool = this.chunkResultPool.filter(f => f.seq !== seq)
           }
         }
         this.executorFn()
@@ -211,8 +234,14 @@ export class TaskPool {
     this.stop = () => {
       this.restPool = []
       this.runningPool = []
-      this.isRunning = false
+      this.isRunning = false // 停止时重置isRunning
       this.paused = false
+    }
+    // 启动任务池调度，幂等保护
+    this.start = () => {
+      if (this.isRunning) return
+      this.isRunning = true
+      this.executorFn()
     }
     // 重置任务池：彻底清空所有状态
     this.reset = () => {
@@ -220,17 +249,10 @@ export class TaskPool {
       this.allTasks = []
       this.runningPool = []
       this.resultPool = []
+      this.chunkResultPool = []
       this.restPool = []
-      this.isRunning = false
+      this.isRunning = false // 重置时重置isRunning
       this.paused = false
-    }
-    // 启动任务池调度，幂等保护
-    this.start = () => {
-      if (this.isRunning)
-        return
-      this.isRunning = true
-      this.executorFn()
-      this.isRunning = false
     }
     // 动态调整最大并发数
     this.setConcurrency = (newConcurrency: number) => {
@@ -243,6 +265,7 @@ export class TaskPool {
         running: this.runningPool.length,
         waiting: this.restPool.length,
         finished: this.resultPool.length,
+        chunkFinished: this.chunkResultPool.length,
         results: this.resultPool.slice(),
         paused: this.paused,
       }
@@ -256,7 +279,12 @@ export class TaskPool {
       if (!this.paused)
         return
       this.paused = false
-      this.executorFn()
+      // 如果未运行则自动start，否则继续调度
+      if (!this.isRunning) {
+        this.start()
+      } else {
+        this.executorFn()
+      }
     }
     // 判断任务池是否处于暂停状态
     this.isPaused = () => {

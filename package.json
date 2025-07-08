@@ -1,6 +1,6 @@
 {
   "name": "task-pool-coordinator",
-  "version": "1.0.2",
+  "version": "1.0.7",
   "description": "task pool coordinator",
   "author": "adoin<adoin@qq.com>",
   "devDependencies": {
